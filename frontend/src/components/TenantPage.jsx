@@ -16,8 +16,19 @@ const TenantPage = () => {
     setTenants(prev => [...prev, tenant]);
   };
 
-  const removeTenant = posId => {
-    setTenants(prev => prev.filter(t => t.posId !== posId));
+  const removeTenant = idx => {
+    setTenants(prev => prev.filter((_, i) => i !== idx));
+  };
+
+  const addPosId = (idx, newId) => {
+    setTenants(prev => {
+      const copy = [...prev];
+      if (!Array.isArray(copy[idx].posIds)) {
+        copy[idx].posIds = [];
+      }
+      copy[idx].posIds.push(newId);
+      return copy;
+    });
   };
 
   return (
@@ -25,6 +36,7 @@ const TenantPage = () => {
       tenants={tenants}
       addTenant={addTenant}
       removeTenant={removeTenant}
+      addPosId={addPosId}
     />
   );
 };

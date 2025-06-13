@@ -5,7 +5,7 @@ const WelcomePage = () => {
   return (
     <div
       className="pt-30 flex justify-end items-center min-h-screen bg-cover bg-center"
-      style={{ backgroundImage: "url('/images/b.jpg')" }}
+      style={{ backgroundImage: "url('/Test/images/b.jpg')" }}
     >
       {/* Outer white box */}
       <div className="w-full max-w-sm bg-white rounded-md shadow-xl mr-8 p-8">
