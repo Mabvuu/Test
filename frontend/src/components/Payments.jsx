@@ -2,27 +2,16 @@ import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import * as XLSX from 'xlsx';
 
-const BANKS = [
-  "CBZ Bank Limited","Standard Chartered Bank Zimbabwe","FBC Bank Limited",
-  "Stanbic Bank Zimbabwe","Ecobank Zimbabwe","ZB Bank Limited","BancABC Zimbabwe",
-  "NMB Bank Limited","Agribank (Agricultural Bank of Zimbabwe)","Steward Bank",
-  "POSB (People's Own Savings Bank)","Metbank Limited","First Capital Bank",
-];
-
 export default function Payments() {
   const { posId } = useParams();
   const { state: { name } = {} } = useLocation();
   const navigate = useNavigate();
 
-  // currency + bank
   const [currency, setCurrency] = useState(localStorage.getItem('currency') || 'USD');
-  const [selectedBank, setSelectedBank] = useState(localStorage.getItem('paymentsSelectedBank') || '');
   useEffect(() => { localStorage.setItem('currency', currency) }, [currency]);
-  useEffect(() => { localStorage.setItem('paymentsSelectedBank', selectedBank) }, [selectedBank]);
 
-  // data + search
   const [excelData, setExcelData] = useState(
-    JSON.parse(localStorage.getItem('paymentsExcelData')) || []
+    JSON.parse(localStorage.getItem('paymentsExcelData') || '[]')
   );
   const [searchTerm, setSearchTerm] = useState(
     localStorage.getItem('paymentsSearchTerm') || ''
@@ -37,17 +26,43 @@ export default function Payments() {
   const [notification, setNotification] = useState(null);
   const showNote = (msg, type = 'success') => setNotification({ msg, type });
 
+  const formatDate = dateObj => {
+    const yyyy = dateObj.getFullYear();
+    const mm = String(dateObj.getMonth() + 1).padStart(2, '0');
+    const dd = String(dateObj.getDate()).padStart(2, '0');
+    return `${yyyy}-${mm}-${dd}`;
+  };
+
   const handleFileUpload = e => {
     const file = e.target.files[0];
-    if (!file) return showNote('No file selected', 'error');
-    if (!/\.(xlsx|xls)$/i.test(file.name)) return showNote('Only .xlsx/.xls allowed', 'error');
+    if (!file) {
+      showNote('No file selected', 'error');
+      return;
+    }
+    if (!/\.(xlsx|xls)$/i.test(file.name)) {
+      showNote('Only .xlsx/.xls allowed', 'error');
+      return;
+    }
     const reader = new FileReader();
     reader.onload = evt => {
-      const data = new Uint8Array(evt.target.result);
-      const wb = XLSX.read(data, { type: 'array' });
-      const sheet = wb.Sheets[wb.SheetNames[0]];
-      setExcelData(XLSX.utils.sheet_to_json(sheet, { defval: '' }));
-      showNote('Excel loaded');
+      try {
+        const data = new Uint8Array(evt.target.result);
+        const wb = XLSX.read(data, { type: 'array', cellDates: true });
+        const sheet = wb.Sheets[wb.SheetNames[0]];
+        const rawRows = XLSX.utils.sheet_to_json(sheet, { defval: '', raw: false });
+        const parsedRows = rawRows.map(row => {
+          const newRow = {};
+          Object.entries(row).forEach(([k, v]) => {
+            newRow[k] = v instanceof Date ? formatDate(v) : v;
+          });
+          return newRow;
+        });
+        setExcelData(parsedRows);
+        showNote('Excel loaded');
+      } catch (err) {
+        console.error('Failed to parse Excel:', err);
+        showNote('Failed to parse Excel file', 'error');
+      }
     };
     reader.readAsArrayBuffer(file);
   };
@@ -64,18 +79,24 @@ export default function Payments() {
     ));
 
   const saveReportToServer = async () => {
-    if (!name) return showNote('Name required', 'error');
-    const date = new Date().toISOString().slice(0,10);
+    if (!name) {
+      showNote('Name required', 'error');
+      return;
+    }
+    const date = new Date().toISOString().slice(0, 10);
     const tableData = filteredData.map(row => {
-      const m = { ...row, Bank: selectedBank };
-      Object.keys(m).forEach(k => { m[k] = m[k].toString() });
+      const m = { ...row };
+      Object.keys(m).forEach(k => { m[k] = m[k].toString(); });
       return m;
     });
     try {
-      const res = await fetch('http://localhost:3001/api/reports/upload', {
+      const res = await fetch('/api/reports/upload', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name, posId, date, currency, bank: selectedBank, source: "payments", tableData })
+        body: JSON.stringify({
+          name, posId, date, currency,
+          source: "sales", tableData
+        }),
       });
       if (!res.ok) throw new Error();
       const { reportId } = await res.json();
@@ -88,17 +109,15 @@ export default function Payments() {
   const clearAll = () => {
     setExcelData([]);
     setSearchTerm('');
-    setSelectedBank('');
     localStorage.removeItem('paymentsExcelData');
     localStorage.removeItem('paymentsSearchTerm');
-    localStorage.removeItem('paymentsSelectedBank');
     showNote('Cleared');
   };
 
   return (
     <div id="payments" className="flex flex-col pt-20 px-4 h-screen bg-gray-50">
       {notification && (
-        <div className="fixed inset-0 flex items-center justify-center pointer-events-none">
+        <div className="fixed left-4 top-4 z-50 pointer-events-none">
           <div className={`pointer-events-auto p-4 rounded shadow-lg ${
               notification.type==='success'? 'bg-green-100' : 'bg-red-100'
             }`}>
@@ -112,7 +131,7 @@ export default function Payments() {
 
       {/* header */}
       <div className="p-4 bg-white shadow flex pt-30 flex-wrap items-end space-x-4">
-        <h1 className="text-xl font-bold flex-shrink-0">Payments</h1>
+        <h1 className="text-xl font-bold flex-shrink-0">Sales</h1>
         <div className="text-sm text-gray-600">
           POS ID: <span className="font-medium">{posId}</span>
         </div>
@@ -125,17 +144,6 @@ export default function Payments() {
           >
             <option value="USD">USD</option>
             <option value="ZWG">ZWG</option>
-          </select>
-        </label>
-        <label className="flex flex-col">
-          <span className="text-sm">Bank</span>
-          <select
-            value={selectedBank}
-            onChange={e=>setSelectedBank(e.target.value)}
-            className="p-2 border rounded"
-          >
-            <option value="">--Select a Bank--</option>
-            {BANKS.map(b=> <option key={b} value={b}>{b}</option>)}
           </select>
         </label>
         <input
@@ -167,7 +175,6 @@ export default function Payments() {
                   {Object.keys(filteredData[0]).map(h=>(
                     <th key={h} className="p-2 border bg-gray-100 text-left text-sm">{h}</th>
                   ))}
-                  <th className="p-2 border bg-gray-100 text-left text-sm">Bank</th>
                 </tr>
               </thead>
               <tbody className="divide-y">
@@ -183,7 +190,6 @@ export default function Payments() {
                         />
                       </td>
                     ))}
-                    <td className="p-2 border text-sm">{selectedBank}</td>
                   </tr>
                 ))}
               </tbody>
