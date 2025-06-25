@@ -1,3 +1,4 @@
+// frontend/src/components/Payments.jsx
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import * as XLSX from 'xlsx';
@@ -8,7 +9,9 @@ export default function Payments() {
   const navigate = useNavigate();
 
   const [currency, setCurrency] = useState(localStorage.getItem('currency') || 'USD');
-  useEffect(() => { localStorage.setItem('currency', currency) }, [currency]);
+  useEffect(() => {
+    localStorage.setItem('currency', currency);
+  }, [currency]);
 
   const [excelData, setExcelData] = useState(
     JSON.parse(localStorage.getItem('paymentsExcelData') || '[]')
@@ -49,7 +52,7 @@ export default function Payments() {
         const data = new Uint8Array(evt.target.result);
         const wb = XLSX.read(data, { type: 'array', cellDates: true });
         const sheet = wb.Sheets[wb.SheetNames[0]];
-        const rawRows = XLSX.utils.sheet_to_json(sheet, { defval: '', raw: false });
+        const rawRows = XLSX.utils.sheet_to_json(sheet, { defval: '', raw: true });
         const parsedRows = rawRows.map(row => {
           const newRow = {};
           Object.entries(row).forEach(([k, v]) => {
@@ -57,8 +60,14 @@ export default function Payments() {
           });
           return newRow;
         });
+
+        if (parsedRows.length === 0) {
+          setExcelData([]);
+          showNote('No data in file', 'error');
+          return;
+        }
         setExcelData(parsedRows);
-        showNote('Excel loaded');
+        showNote(`Loaded ${parsedRows.length} rows`);
       } catch (err) {
         console.error('Failed to parse Excel:', err);
         showNote('Failed to parse Excel file', 'error');
@@ -74,9 +83,9 @@ export default function Payments() {
   );
 
   const updateCell = (rowIdx, key, value) =>
-    setExcelData(d => d.map((row, i) =>
-      i === rowIdx ? { ...row, [key]: value } : row
-    ));
+    setExcelData(d =>
+      d.map((row, i) => (i === rowIdx ? { ...row, [key]: value } : row))
+    );
 
   const saveReportToServer = async () => {
     if (!name) {
@@ -86,7 +95,9 @@ export default function Payments() {
     const date = new Date().toISOString().slice(0, 10);
     const tableData = filteredData.map(row => {
       const m = { ...row };
-      Object.keys(m).forEach(k => { m[k] = m[k].toString(); });
+      Object.keys(m).forEach(k => {
+        m[k] = m[k].toString();
+      });
       return m;
     });
     try {
@@ -114,6 +125,12 @@ export default function Payments() {
     showNote('Cleared');
   };
 
+  const normalize = str =>
+    str.toString().trim().toLowerCase().replace(/[\s_/]+/g, '');
+  const findDateKey = row => Object.keys(row).find(k => normalize(k) === 'date') || null;
+  const findSumKey = row =>
+    Object.keys(row).find(k => normalize(k) === 'sumofpremiumcollected') || null;
+
   return (
     <div id="payments" className="flex flex-col pt-20 px-4 h-screen bg-gray-50">
       {notification && (
@@ -129,7 +146,6 @@ export default function Payments() {
         </div>
       )}
 
-      {/* header */}
       <div className="p-4 bg-white shadow flex pt-30 flex-wrap items-end space-x-4">
         <h1 className="text-xl font-bold flex-shrink-0">Sales</h1>
         <div className="text-sm text-gray-600">
@@ -165,31 +181,39 @@ export default function Payments() {
         )}
       </div>
 
-      {/* table */}
       <div className="flex-1 overflow-auto p-4">
         {filteredData.length > 0 ? (
           <div className="min-w-max">
             <table className="min-w-full border-collapse">
               <thead>
                 <tr>
-                  {Object.keys(filteredData[0]).map(h=>(
-                    <th key={h} className="p-2 border bg-gray-100 text-left text-sm">{h}</th>
+                  {Object.keys(filteredData[0]).map(h => (
+                    <th
+                      key={h}
+                      className="p-2 border bg-gray-100 text-left text-sm"
+                    >
+                      {h}
+                    </th>
                   ))}
                 </tr>
               </thead>
               <tbody className="divide-y">
-                {filteredData.map((row,i)=>(
+                {filteredData.map((row, i) => (
                   <tr key={i} className="hover:bg-gray-50">
-                    {Object.entries(row).map(([k,v])=>(
-                      <td key={k} className="p-2 border text-sm">
-                        <input
-                          type="text"
-                          value={v}
-                          onChange={e=>updateCell(i,k,e.target.value)}
-                          className="w-full p-1 border rounded text-sm"
-                        />
-                      </td>
-                    ))}
+                    {Object.entries(row).map(([k, v]) => {
+                      const num = parseFloat(v);
+                      const isNegative = !isNaN(num) && num < 0;
+                      return (
+                        <td key={k} className="p-2 border text-sm">
+                          <input
+                            type="text"
+                            value={v}
+                            onChange={e=>updateCell(i, k, e.target.value)}
+                            className={`w-full p-1 border rounded text-sm ${isNegative ? 'text-red-600' : ''}`}
+                          />
+                        </td>
+                      );
+                    })}
                   </tr>
                 ))}
               </tbody>
@@ -200,13 +224,12 @@ export default function Payments() {
         )}
       </div>
 
-      {/* footer */}
       <div className="p-4 bg-white shadow flex justify-end space-x-3">
         <button
           onClick={clearAll}
           className="px-4 py-2 bg-red-500 hover:bg-red-600 text-white rounded"
         >Clear</button>
-        {excelData.length > 0 && (
+        {filteredData.length > 0 && (
           <button
             onClick={saveReportToServer}
             className="px-4 py-2 bg-blue-500 hover:bg-blue-600 text-white rounded"
@@ -217,7 +240,33 @@ export default function Payments() {
           className="px-4 py-2 bg-gray-300 hover:bg-gray-400 rounded"
         >Back</button>
         <button
-          onClick={()=>navigate(`/payments/${posId}/sales`, { state: { name } })}
+          onClick={() => {
+            if (filteredData.length === 0) {
+              showNote('No data to proceed', 'error');
+              return;
+            }
+            const dateKey = findDateKey(filteredData[0]);
+            const sumKey = findSumKey(filteredData[0]);
+            if (!dateKey || !sumKey) {
+              showNote('Ensure columns "Date" and "SumOfPremium_Collected" exist', 'error');
+              return;
+            }
+            const transformed = filteredData.map(row => {
+              const dateVal = row[dateKey];
+              const raw = parseFloat(String(row[sumKey]).replace(/,/g, '').trim()) || 0;
+              const gross = raw >= 0 ? raw : 0;
+              const canc = raw < 0 ? Math.abs(raw) : 0;
+              return {
+                Date: dateVal,
+                "Gross Premium": gross.toString(),
+                "Cancellation": canc.toString(),
+              };
+            });
+            navigate(
+              `/payments/${posId}/cashbook`,
+              { state: { name, data: transformed, currency } }
+            );
+          }}
           className="px-4 py-2 bg-green-500 hover:bg-green-600 text-white rounded"
         >Next</button>
       </div>

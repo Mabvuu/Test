@@ -12,6 +12,7 @@ import AdminDashboard from './components/AdminDashboard'
 import AdminNav from './components/AdminNav'
 import AgentNav from './components/Navbar'
 import Sales from './components/SalesOne'
+import SalesSummary from './components/SalesSummary'
 
 const DesktopGuard = ({ children }) => {
   const isDesktop = window.innerWidth >= 768
@@ -69,6 +70,7 @@ const App = () => {
                  <Route path="payments/:posId" element={<PaymentsPage />} />
                   <Route path="payments/:posId/cashbook" element={<Cashbook/>} />
                   <Route path="payments/:posId/sales" element={<Sales/>} />
+                  <Route path="payments/:posId/summary" element={<SalesSummary/>} />
                   <Route path="reports" element={<Reports />} />
                   <Route
                     path="add"

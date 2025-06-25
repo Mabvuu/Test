@@ -1,131 +1,248 @@
+// frontend/src/components/Cashbook.jsx
 import React, { useState, useEffect } from "react";
 import { useParams, useNavigate, useLocation } from "react-router-dom";
-import * as XLSX from "xlsx";
 
 const HEADERS = [
-  "Date","Name","Gross Premium","Cancellation","Actual Gross",
-  "Commission %","Commission","Net Premium","ZINARA","PPA GROSS",
-  "PPA %","PPA Commission","Net PPA","Approved expenses",
-  "Expected remittances"
+  "Date", "Gross Premium", "Cancellation", "Actual Gross",
+  "Commission %", "Commission", "Net Premium", "ZINARA", "PPA GROSS",
+  "PPA %", "PPA Commission", "Net PPA", "Approved expenses",
+  "Expected remittances", "Remittances collected", "Balance", "Comment"
 ];
 
 const CURRENCY_SYMBOLS = { USD: "$", ZWG: "ZWG " };
+
 const normalize = str =>
   str.toString().trim().toLowerCase().replace(/[\s_/]+/g, "");
+
 const getValue = (row, header) => {
   const key = Object.keys(row).find(k => normalize(k) === normalize(header));
   return key ? row[key] : "";
 };
+
 const formatAmt = (num, currency) =>
-  `${CURRENCY_SYMBOLS[currency] || ""}${parseFloat(num||0).toFixed(2)}`;
+  `${CURRENCY_SYMBOLS[currency] || ""}${parseFloat(num || 0).toFixed(2)}`;
 
 export default function Cashbook() {
   const { posId } = useParams();
-  const { state: { name } = {} } = useLocation();
+  const { state: { name, data, currency: passedCurrency } = {} } = useLocation();
   const navigate = useNavigate();
 
-  const [currency, setCurrency] = useState(localStorage.getItem("currency")||"USD");
-  const [excelData, setExcelData] = useState(JSON.parse(localStorage.getItem("excelData"))||[]);
+  const [currency, setCurrency] = useState(
+    passedCurrency || localStorage.getItem("currency") || "USD"
+  );
+  const [excelData, setExcelData] = useState([]);
   const [notification, setNotification] = useState(null);
+  const [combinedMap, setCombinedMap] = useState({});
 
   useEffect(() => {
     localStorage.setItem("currency", currency);
   }, [currency]);
 
+  const showNote = (msg, type="success") => setNotification({ msg, type });
+
+  // Load combined payments summary by date from localStorage
   useEffect(() => {
-    localStorage.setItem("excelData", JSON.stringify(excelData));
-  }, [excelData]);
+    const key = `payments_${posId}`;
+    try {
+      const raw = localStorage.getItem(key);
+      if (!raw) {
+        setCombinedMap({});
+        return;
+      }
+      const arr = JSON.parse(raw);
+      const globalDateMap = {};
+      arr.forEach(({ method, rows }) => {
+        rows.forEach(r => {
+          const d = r.txnDate || "";
+          if (!d) return;
+          let amt = 0;
+          if (method === 'ecocash' || method === 'cash') {
+            amt = parseFloat(r.amount) || 0;
+          } else {
+            const credit = parseFloat(r.credit) || 0;
+            if (credit <= 0) return;
+            amt = credit;
+          }
+          globalDateMap[d] = (globalDateMap[d] || 0) + amt;
+        });
+      });
+      setCombinedMap(globalDateMap);
+    } catch (err) {
+      console.error("Failed to load combined payments:", err);
+      setCombinedMap({});
+    }
+  }, [posId]);
 
-  const showNote = (msg, type="success") => setNotification({msg, type});
-
+  // recalc using Gross Premium / Cancellation
   const recalcRow = row => {
-    const gp = parseFloat(getValue(row,"Gross Premium"))||0;
-    const canc = parseFloat(getValue(row,"Cancellation"))||0;
+    const gp = parseFloat(getValue(row, "Gross Premium")) || 0;
+    const canc = parseFloat(getValue(row, "Cancellation")) || 0;
     const actual = gp - canc;
-    const comm = actual * ((row.commissionPct||0)/100);
+    const commPct = parseFloat(row.commissionPct) || 0;
+    const comm = actual * (commPct / 100);
     const netPrem = actual - comm;
-    const ppaG = parseFloat(row.ppaGross)||0;
-    const ppaComm = ppaG * ((row.ppaPct||0)/100);
+    const ppaG = parseFloat(row.ppaGross) || 0;
+    const ppaPct = parseFloat(row.ppaPct) || 0;
+    const ppaComm = ppaG * (ppaPct / 100);
     const netP = ppaG - ppaComm;
-    const zin = parseFloat(row.ZINARA)||0;
-    const exp = parseFloat(row.approvedExpenses)||0;
+    const zin = parseFloat(row.ZINARA) || 0;
+    const exp = parseFloat(row.approvedExpenses) || 0;
     const remits = netPrem + zin + netP - exp;
-    return { actual, comm, netPrem, ppaComm, netP, remits };
+    // remittancesCollected from combinedMap
+    const remCollected = parseFloat(row.remittancesCollected) || 0;
+    const balance = remits - remCollected;
+    return {
+      actualGross: parseFloat(actual.toFixed(2)),
+      commission: parseFloat(comm.toFixed(2)),
+      netPremium: parseFloat(netPrem.toFixed(2)),
+      ppaCommission: parseFloat(ppaComm.toFixed(2)),
+      netPpa: parseFloat(netP.toFixed(2)),
+      expectedRemittances: parseFloat(remits.toFixed(2)),
+      balance: parseFloat(balance.toFixed(2))
+    };
   };
 
-  const handleFileUpload = e => {
-    const file = e.target.files[0];
-    if(!file) return showNote("No file selected","error");
-    const reader = new FileReader();
-    reader.onload = evt => {
-      const data = new Uint8Array(evt.target.result);
-      const wb = XLSX.read(data,{type:"array"});
-      const sheet = wb.Sheets[wb.SheetNames[0]];
-      const raw = XLSX.utils.sheet_to_json(sheet,{defval:""});
-      const rows = raw.map(r => {
-        const base = {
-          ...r,
-          commissionPct:0, ppaGross:0, ppaPct:0,
-          ZINARA:0, approvedExpenses:0,
+  // Load initial excelData, expecting data rows with Date, Gross Premium, Cancellation
+  useEffect(() => {
+    if (Array.isArray(data) && data.length > 0) {
+      const rows = data.map(r => {
+        const dateVal = r["Date"];
+        const grossRaw = parseFloat(r["Gross Premium"]) || 0;
+        const cancRaw = parseFloat(r["Cancellation"]) || 0;
+        const combinedTotal = combinedMap[dateVal] || 0;
+        const row = {
+          Date: dateVal,
+          "Gross Premium": grossRaw.toFixed(2),
+          "Cancellation": cancRaw.toFixed(2),
+          commissionPct: 0,
+          ppaGross: 0,
+          ppaPct: 0,
+          ZINARA: 0,
+          approvedExpenses: 0,
+          remittancesCollected: combinedTotal.toFixed(2),
+          comment: ""
         };
-        const { actual, comm, netPrem, ppaComm, netP, remits } = recalcRow(base);
+        const derived = recalcRow(row);
         return {
-          ...base,
-          actualGross: actual,
-          commission: comm,
-          netPremium: netPrem,
-          ppaCommission: ppaComm,
-          netPpa: netP,
-          expectedRemittances: remits,
+          ...row,
+          actualGross: derived.actualGross.toFixed(2),
+          commission: derived.commission.toFixed(2),
+          netPremium: derived.netPremium.toFixed(2),
+          ppaCommission: derived.ppaCommission.toFixed(2),
+          netPpa: derived.netPpa.toFixed(2),
+          expectedRemittances: derived.expectedRemittances.toFixed(2),
+          balance: derived.balance.toFixed(2)
         };
       });
       setExcelData(rows);
-      showNote("Excel loaded");
-    };
-    reader.readAsArrayBuffer(file);
-  };
+      localStorage.setItem("cashbookData", JSON.stringify(rows));
+    } else {
+      const saved = JSON.parse(localStorage.getItem("cashbookData") || "[]");
+      const updated = saved.map(row => {
+        const dateVal = getValue(row, "Date");
+        const combinedTotal = combinedMap[dateVal] || 0;
+        row.remittancesCollected = combinedTotal.toFixed(2);
+        const derived = recalcRow(row);
+        row.balance = derived.balance.toFixed(2);
+        return row;
+      });
+      setExcelData(updated);
+    }
+  }, [data, combinedMap]);
 
   const handleFieldChange = (i, field, val) => {
     const list = [...excelData];
-    list[i][field] = val;
-    const { actual, comm, netPrem, ppaComm, netP, remits } = recalcRow(list[i]);
-    list[i].actualGross = actual;
-    list[i].commission = comm;
-    list[i].netPremium = netPrem;
-    list[i].ppaCommission = ppaComm;
-    list[i].netPpa = netP;
-    list[i].expectedRemittances = remits;
-    setExcelData(list);
+    if (["commissionPct","ppaGross","ppaPct","ZINARA","approvedExpenses"].includes(field) ||
+        field === "comment") {
+      list[i][field] = val;
+      const dateVal = list[i].Date;
+      const combinedTotal = combinedMap[dateVal] || 0;
+      list[i].remittancesCollected = combinedTotal.toFixed(2);
+      const derived = recalcRow(list[i]);
+      list[i].actualGross = derived.actualGross.toFixed(2);
+      list[i].commission = derived.commission.toFixed(2);
+      list[i].netPremium = derived.netPremium.toFixed(2);
+      list[i].ppaCommission = derived.ppaCommission.toFixed(2);
+      list[i].netPpa = derived.netPpa.toFixed(2);
+      list[i].expectedRemittances = derived.expectedRemittances.toFixed(2);
+      list[i].balance = derived.balance.toFixed(2);
+      setExcelData(list);
+      localStorage.setItem("cashbookData", JSON.stringify(list));
+    }
   };
 
   const saveReportToServer = async () => {
-    if(!name) return showNote("Name required","error");
+    if (!name) {
+      showNote("Name required","error");
+      return;
+    }
     try {
       const date = new Date().toISOString().slice(0,10);
-      const tableData = excelData.map(row=>{
+      const tableData = excelData.map(row => {
         const mapped = {};
-        HEADERS.forEach(h=>{
-          switch(h){
-            case "Actual Gross": mapped[h] = formatAmt(row.actualGross,currency); break;
-            case "Commission %": mapped[h] = (row.commissionPct||0).toString(); break;
-            case "Commission": mapped[h] = formatAmt(row.commission,currency); break;
-            case "Net Premium": mapped[h] = formatAmt(row.netPremium,currency); break;
-            case "ZINARA": mapped[h] = (row.ZINARA||0).toString(); break;
-            case "PPA GROSS": mapped[h] = (row.ppaGross||0).toString(); break;
-            case "PPA %": mapped[h] = (row.ppaPct||0).toString(); break;
-            case "PPA Commission": mapped[h] = formatAmt(row.ppaCommission,currency); break;
-            case "Net PPA": mapped[h] = formatAmt(row.netPpa,currency); break;
-            case "Approved expenses": mapped[h] = (row.approvedExpenses||0).toString(); break;
-            case "Expected remittances": mapped[h] = formatAmt(row.expectedRemittances,currency); break;
-            default: mapped[h] = getValue(row,h).toString();
+        HEADERS.forEach(h => {
+          switch(h) {
+            case "Date":
+              mapped[h] = getValue(row, "Date").toString();
+              break;
+            case "Gross Premium":
+              mapped[h] = formatAmt(getValue(row, "Gross Premium"), currency);
+              break;
+            case "Cancellation":
+              mapped[h] = formatAmt(getValue(row, "Cancellation"), currency);
+              break;
+            case "Actual Gross":
+              mapped[h] = formatAmt(row.actualGross, currency);
+              break;
+            case "Commission %":
+              mapped[h] = (row.commissionPct || 0).toString();
+              break;
+            case "Commission":
+              mapped[h] = formatAmt(row.commission, currency);
+              break;
+            case "Net Premium":
+              mapped[h] = formatAmt(row.netPremium, currency);
+              break;
+            case "ZINARA":
+              mapped[h] = (row.ZINARA || 0).toString();
+              break;
+            case "PPA GROSS":
+              mapped[h] = (row.ppaGross || 0).toString();
+              break;
+            case "PPA %":
+              mapped[h] = (row.ppaPct || 0).toString();
+              break;
+            case "PPA Commission":
+              mapped[h] = formatAmt(row.ppaCommission, currency);
+              break;
+            case "Net PPA":
+              mapped[h] = formatAmt(row.netPpa, currency);
+              break;
+            case "Approved expenses":
+              mapped[h] = (row.approvedExpenses || 0).toString();
+              break;
+            case "Expected remittances":
+              mapped[h] = formatAmt(row.expectedRemittances, currency);
+              break;
+            case "Remittances collected":
+              mapped[h] = formatAmt(row.remittancesCollected, currency);
+              break;
+            case "Balance":
+              mapped[h] = formatAmt(row.balance, currency);
+              break;
+            case "Comment":
+              mapped[h] = (row.comment || "").toString();
+              break;
+            default:
+              mapped[h] = getValue(row, h).toString();
           }
         });
         return mapped;
       });
-      const res = await fetch("http://localhost:3001/api/reports/upload", {
+      const res = await fetch("/api/reports/upload", {
         method:"POST",
         headers:{"Content-Type":"application/json"},
-        body: JSON.stringify({ name, posId, date, currency, source: "sales", tableData })
+        body: JSON.stringify({ name, posId, date, currency, source: "cashbook", tableData })
       });
       if(!res.ok) throw new Error();
       const { reportId } = await res.json();
@@ -135,16 +252,14 @@ export default function Cashbook() {
     }
   };
 
-  const clearLast = () => {
+  const clearAll = () => {
     setExcelData([]);
-    localStorage.removeItem("excelData");
+    localStorage.removeItem("cashbookData");
     showNote("Cleared");
   };
 
-  const data = excelData;
-
   return (
-    <div id="sales" className="flex flex-col pt-36 px-4 h-screen bg-gray-50">
+    <div id="cashbook" className="flex flex-col pt-36 px-4 h-screen bg-gray-50">
       {notification && (
         <div className="fixed inset-0 flex items-center justify-center pointer-events-none">
           <div className={`pointer-events-auto p-4 rounded shadow-lg ${
@@ -160,7 +275,6 @@ export default function Cashbook() {
 
       <div className="p-4 bg-white shadow flex flex-wrap items-end space-x-4">
         <h1 className="text-xl font-bold">Cashbook</h1>
-
         <label className="flex flex-col">
           <span className="text-sm">Currency</span>
           <select
@@ -172,13 +286,6 @@ export default function Cashbook() {
             <option value="ZWG">ZWG</option>
           </select>
         </label>
-
-        <input
-          type="file"
-          accept=".xlsx,.xls"
-          onChange={handleFileUpload}
-          className="p-2 border rounded flex-grow min-w-[200px]"
-        />
       </div>
 
       <div className="flex-1 overflow-auto p-4">
@@ -186,66 +293,85 @@ export default function Cashbook() {
           <table className="min-w-full border-collapse">
             <thead>
               <tr>
-                {HEADERS.map(h=>(
-                  <th key={h} className="p-2 border bg-gray-100 text-left text-sm">{h}</th>
+                {HEADERS.map(h => (
+                  <th key={h} className="p-2 border bg-gray-100 text-left text-sm">
+                    {h}
+                  </th>
                 ))}
               </tr>
             </thead>
             <tbody className="divide-y">
-              {data.length===0
-                ? <tr><td colSpan={HEADERS.length} className="p-4 text-center text-gray-500">No data.</td></tr>
-                : data.map((row,i)=>(
+              {excelData.length === 0
+                ? (
+                  <tr>
+                    <td colSpan={HEADERS.length} className="p-4 text-center text-gray-500">
+                      No data.
+                    </td>
+                  </tr>
+                )
+                : excelData.map((row, i) => (
                   <tr key={i} className="hover:bg-gray-50">
-                    <td className="p-2 border text-sm">{getValue(row,"Date")}</td>
-                    <td className="p-2 border text-sm">{getValue(row,"Name")}</td>
-                    <td className="p-2 border text-sm">{getValue(row,"Gross Premium")}</td>
-                    <td className="p-2 border text-sm">{getValue(row,"Cancellation")}</td>
-                    <td className="p-2 border text-sm">{formatAmt(row.actualGross,currency)}</td>
+                    <td className="p-2 border text-sm">{getValue(row, "Date")}</td>
+                    <td className="p-2 border text-sm">{formatAmt(getValue(row, "Gross Premium"), currency)}</td>
+                    <td className="p-2 border text-sm">{formatAmt(getValue(row, "Cancellation"), currency)}</td>
+                    <td className="p-2 border text-sm">{formatAmt(row.actualGross, currency)}</td>
                     <td className="p-2 border">
                       <input
                         type="number"
-                        value={row.commissionPct||''}
-                        onChange={e=>handleFieldChange(i,"commissionPct",+e.target.value)}
+                        value={row.commissionPct || ''}
+                        onChange={e => handleFieldChange(i, "commissionPct", +e.target.value)}
                         className="w-16 p-1 border rounded text-sm"
                       />
                     </td>
-                    <td className="p-2 border text-sm">{formatAmt(row.commission,currency)}</td>
-                    <td className="p-2 border text-sm">{formatAmt(row.netPremium,currency)}</td>
+                    <td className="p-2 border text-sm">{formatAmt(row.commission, currency)}</td>
+                    <td className="p-2 border text-sm">{formatAmt(row.netPremium, currency)}</td>
                     <td className="p-2 border">
                       <input
                         type="number"
-                        value={row.ZINARA||''}
-                        onChange={e=>handleFieldChange(i,"ZINARA",+e.target.value)}
-                        className="w-16 p-1 border rounded text-sm"
-                      />
-                    </td>
-                    <td className="p-2 border">
-                      <input
-                        type="number"
-                        value={row.ppaGross||''}
-                        onChange={e=>handleFieldChange(i,"ppaGross",+e.target.value)}
+                        value={row.ZINARA || ''}
+                        onChange={e => handleFieldChange(i, "ZINARA", +e.target.value)}
                         className="w-16 p-1 border rounded text-sm"
                       />
                     </td>
                     <td className="p-2 border">
                       <input
                         type="number"
-                        value={row.ppaPct||''}
-                        onChange={e=>handleFieldChange(i,"ppaPct",+e.target.value)}
+                        value={row.ppaGross || ''}
+                        onChange={e => handleFieldChange(i, "ppaGross", +e.target.value)}
                         className="w-16 p-1 border rounded text-sm"
                       />
                     </td>
-                    <td className="p-2 border text-sm">{formatAmt(row.ppaCommission,currency)}</td>
-                    <td className="p-2 border text-sm">{formatAmt(row.netPpa,currency)}</td>
                     <td className="p-2 border">
                       <input
                         type="number"
-                        value={row.approvedExpenses||''}
-                        onChange={e=>handleFieldChange(i,"approvedExpenses",+e.target.value)}
+                        value={row.ppaPct || ''}
+                        onChange={e => handleFieldChange(i, "ppaPct", +e.target.value)}
                         className="w-16 p-1 border rounded text-sm"
                       />
                     </td>
-                    <td className="p-2 border text-sm">{formatAmt(row.expectedRemittances,currency)}</td>
+                    <td className="p-2 border text-sm">{formatAmt(row.ppaCommission, currency)}</td>
+                    <td className="p-2 border text-sm">{formatAmt(row.netPpa, currency)}</td>
+                    <td className="p-2 border">
+                      <input
+                        type="number"
+                        value={row.approvedExpenses || ''}
+                        onChange={e => handleFieldChange(i, "approvedExpenses", +e.target.value)}
+                        className="w-16 p-1 border rounded text-sm"
+                      />
+                    </td>
+                    <td className="p-2 border text-sm">{formatAmt(row.expectedRemittances, currency)}</td>
+                    <td className="p-2 border text-sm">
+                      {formatAmt(row.remittancesCollected, currency)}
+                    </td>
+                    <td className="p-2 border text-sm">{formatAmt(row.balance, currency)}</td>
+                    <td className="p-2 border">
+                      <input
+                        type="text"
+                        value={row.comment || ''}
+                        onChange={e => handleFieldChange(i, "comment", e.target.value)}
+                        className="w-32 p-1 border rounded text-sm"
+                      />
+                    </td>
                   </tr>
                 ))
               }
@@ -257,11 +383,13 @@ export default function Cashbook() {
       <div className="p-4 bg-white shadow flex justify-end space-x-3">
         <button onClick={()=>navigate(-1)} className="px-4 py-2 bg-gray-300 hover:bg-gray-400 rounded">Back</button>
         <button onClick={saveReportToServer} className="px-4 py-2 bg-blue-500 hover:bg-blue-600 text-white rounded">Done</button>
-        <button onClick={clearLast} className="px-4 py-2 bg-red-500 hover:bg-red-600 text-white rounded">Clear</button>
+        <button onClick={clearAll} className="px-4 py-2 bg-red-500 hover:bg-red-600 text-white rounded">Clear</button>
         <button
-          onClick={()=>navigate('/reports', { state: { name, posId } })}
+          onClick={() => navigate(`/payments/${posId}/sales`, { state: { name } })}
           className="px-4 py-2 bg-green-500 hover:bg-green-600 text-white rounded"
-        >Next</button>
+        >
+          Next
+        </button>
       </div>
     </div>
   );
