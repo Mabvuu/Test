@@ -1,4 +1,3 @@
-
 import { Link } from 'react-router-dom'
 
 export default function AdminNav() {
@@ -10,18 +9,18 @@ export default function AdminNav() {
 
   const links = [
     { to: '/add', label: 'Admin Dashboard' },
-    { to: '/tenants',         label: 'Agent List'     },
-    { to: '/reports',         label: 'Reports'         },
+    { to: '/tenants', label: 'Agent List' },
+    { to: '/reports', label: 'Reports' },
   ]
 
   return (
-    <nav className="fixed top-0 left-0 w-full flex items-center justify-between bg-[#6B8E23] shadow-lg py-4 px-8">
+    <nav className="fixed top-0 left-0 w-full z-50 flex items-center justify-between bg-[#4F5862] shadow-lg py-4 px-8">
       {/* Logo & Title */}
       <div className="flex items-center space-x-4">
         <img
-          src="/Test/images/logo1.png"
+          src="/images/logo1.png"
           alt="Logo"
-          className="h-20 w-20 rounded-full border-2 border-white"
+          className="h-30 w-30 rounded-full border-2 border-white"
         />
         <h2 className="text-white text-lg font-bold uppercase">Admin</h2>
       </div>
