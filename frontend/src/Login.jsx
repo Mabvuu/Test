@@ -1,33 +1,103 @@
-// src/Login.jsx
-import React, { useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 
 export default function Login({ setToken, setIsAdmin }) {
-  const [view, setView] = useState('admin') // 'admin' or 'manager'
-  const [adminEmail, setAdminEmail] = useState('')
-  const [adminPassword, setAdminPassword] = useState('')
-  const [managerEmail, setManagerEmail] = useState('')
-  const [idNumber, setIdNumber] = useState('')
-  const navigate = useNavigate()
+  const [view, setView] = useState('admin'); // 'admin' or 'manager'
+  const [adminEmail, setAdminEmail] = useState('');
+  const [adminPassword, setAdminPassword] = useState('');
+  const [managerEmail, setManagerEmail] = useState('');
+  const [idNumber, setIdNumber] = useState('');
+  const [notifications, setNotifications] = useState([]);
 
-  const submitAdmin = () => {
-    // simulate admin login
-    setToken('mockToken')
-    setIsAdmin(true)
-    navigate('/add')
-  }
+  const navigate = useNavigate();
 
-  const submitManager = () => {
-    // simulate manager login
-    setToken('mockToken')
-    setIsAdmin(false)
-    navigate('/tenants')
-  }
+  // In-UI toast helper
+  const showNotification = (msg) => {
+    const id = Date.now();
+    setNotifications((n) => [...n, { id, msg }]);
+    setTimeout(() => {
+      setNotifications((n) => n.filter((x) => x.id !== id));
+    }, 3000);
+  };
+
+  // Mock API responses
+  const mockApiResponse = (endpoint, data) => {
+    return new Promise((resolve, reject) => {
+      setTimeout(() => {
+        if (endpoint === '/auth/login') {
+          if (data.email === 'admin@example.com' && data.password === 'password') {
+            resolve({
+              data: {
+                token: btoa(JSON.stringify({ is_admin: true })),
+              },
+            });
+          } else {
+            reject({ response: { data: 'Invalid admin credentials' } });
+          }
+        } else if (endpoint === '/manager/login') {
+          if (data.email === 'manager@example.com' && data.idNumber === '12345') {
+            resolve({
+              data: {
+                token: btoa(JSON.stringify({ is_admin: false })),
+              },
+            });
+          } else {
+            reject({ response: { data: { error: 'Invalid manager credentials' } } });
+          }
+        } else {
+          reject({ response: { data: 'Unknown endpoint' } });
+        }
+      }, 1000);
+    });
+  };
+
+  const submitAdmin = async () => {
+    try {
+      const res = await mockApiResponse('/auth/login', {
+        email: adminEmail,
+        password: adminPassword,
+      });
+      setToken(res.data.token);
+      const payload = JSON.parse(atob(res.data.token.split('.')[1]));
+      setIsAdmin(payload.is_admin);
+      showNotification('Successfully logged in as Admin');
+      navigate('/add');
+    } catch (err) {
+      showNotification(err.response?.data || 'Admin login failed');
+    }
+  };
+
+  const submitManager = async () => {
+    try {
+      const res = await mockApiResponse('/manager/login', {
+        email: managerEmail,
+        idNumber,
+      });
+      setToken(res.data.token);
+      setIsAdmin(false);
+      showNotification('Successfully logged in as Manager');
+      navigate('/tenants');
+    } catch (err) {
+      showNotification(err.response?.data?.error || 'Manager login failed');
+    }
+  };
 
   return (
-    <div className="min-h-screen flex flex-col items-center justify-center bg-[#f5f5f5] text-gray-700">
+    <div className="min-h-screen flex flex-col items-center justify-center bg-[#f5f5f5] text-gray-700 relative">
+      {/* In-UI toasts */}
+      <div className="fixed top-4 left-4 space-y-2 z-50">
+        {notifications.map((n) => (
+          <div
+            key={n.id}
+            className="bg-gray-800 text-white px-4 py-2 rounded shadow"
+          >
+            {n.msg}
+          </div>
+        ))}
+      </div>
+
       <div className="flex space-x-4 mb-6">
-       <button
+        <button
           onClick={() => setView('admin')}
           className={`px-4 py-2 rounded-md font-semibold border border-white ${
             view === 'admin' ? 'bg-[#4F5862] text-white' : 'bg-[#8A9A57] text-white'
@@ -45,12 +115,16 @@ export default function Login({ setToken, setIsAdmin }) {
         </button>
       </div>
 
-      {view === 'admin' ? (
-        <div className="w-full max-w-sm bg-[#808000] rounded-lg shadow-md p-6">
+      {view === 'admin' && (
+        <div className="w-full max-w-sm bg-[#6E7881] rounded-lg shadow-md p-6">
           <div className="rounded-full border-4 border-white border-double p-1">
-            <img src="/Test/images/logo1.png" alt="Logo" className="h-36 w-36" />
+            <img
+              src="/Test/images/logo1.png"
+              alt="Logo"
+              className="h-36 w-36 rounded-full"
+            />
           </div>
-          <h1 className="text-2xl font-bold text-center text-white">
+          <h1 className="text-2xl font-bold text-center pt-4 mb-6 text-white">
             ADMIN LOGIN
           </h1>
           <div className="mb-4">
@@ -61,7 +135,6 @@ export default function Login({ setToken, setIsAdmin }) {
               id="adminEmail"
               type="email"
               placeholder="Enter your email"
-              value={adminEmail}
               onChange={(e) => setAdminEmail(e.target.value)}
               className="w-full px-4 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-[#6B8E23]"
             />
@@ -74,28 +147,29 @@ export default function Login({ setToken, setIsAdmin }) {
               id="adminPassword"
               type="password"
               placeholder="Enter your password"
-              value={adminPassword}
               onChange={(e) => setAdminPassword(e.target.value)}
               className="w-full px-4 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-[#6B8E23]"
             />
           </div>
           <button
             onClick={submitAdmin}
-            className="w-full bg-white text-[#6E7881] hover:text-[#ffffff]  py-2 rounded-md hover:bg-[#556B2F] transition-colors"
+            className="w-full bg-white text-[#6E7881] hover:text-[#ffffff] py-2 rounded-md hover:bg-[#556B2F] transition-colors"
           >
             LOGIN
           </button>
         </div>
-      ) : (
+      )}
+
+      {view === 'manager' && (
         <div className="w-full max-w-sm bg-white rounded-lg shadow-md p-6">
           <div className="rounded-full border-4 border-[#4F5862] border-double p-1">
-    <img
-      src="/images/logo1.png"
-      alt="Logo"
-      className="h-36 w-36 rounded-full"
-    />
-  </div>
-         <h1 className="text-2xl font-bold text-center mb-6 pt-4 text-[#4F5862]">
+            <img
+              src="/Test/images/logo1.png"
+              alt="Logo"
+              className="h-36 w-36 rounded-full"
+            />
+          </div>
+          <h1 className="text-2xl font-bold text-center mb-6 pt-4 text-[#4F5862]">
             ACCOUNT MANAGER LOGIN
           </h1>
           <div className="mb-4">
@@ -106,7 +180,6 @@ export default function Login({ setToken, setIsAdmin }) {
               id="managerEmail"
               type="email"
               placeholder="Enter your email"
-              value={managerEmail}
               onChange={(e) => setManagerEmail(e.target.value)}
               className="w-full px-4 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-[#6B8E23]"
             />
@@ -119,7 +192,6 @@ export default function Login({ setToken, setIsAdmin }) {
               id="idNumber"
               type="text"
               placeholder="Enter your ID number"
-              value={idNumber}
               onChange={(e) => setIdNumber(e.target.value)}
               className="w-full px-4 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-[#6B8E23]"
             />
@@ -133,5 +205,5 @@ export default function Login({ setToken, setIsAdmin }) {
         </div>
       )}
     </div>
-  )
+  );
 }

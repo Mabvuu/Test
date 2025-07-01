@@ -44,7 +44,7 @@ const WelcomePage = () => {
         <div className="flex justify-center">
           <div className="rounded-full border-4 border-white border-double p-2">
             <img
-              src="/images/logo1.png"
+              src="/Test/images/logo1.png"
               alt="Oliver Compass Logo"
               className="h-36 w-36 rounded-full"
             />

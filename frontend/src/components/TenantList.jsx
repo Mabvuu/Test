@@ -58,7 +58,7 @@ const TenantList = ({ tenants, addTenant, removeTenant, addPosId }) => {
       <div
         className="absolute inset-0 bg-repeat opacity-20"
         style={{
-          backgroundImage: "url('/images/logo.png')",
+          backgroundImage: "url('/Test/images/logo.png')",
           backgroundSize: '150px 150px',
         }}
       />

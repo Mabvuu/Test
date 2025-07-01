@@ -17,7 +17,7 @@ export default function AgentNav() {
       {/* Logo & Title */}
       <div className="flex items-center space-x-4">
         <img
-          src="/images/logo1.png"
+          src="/Test/images/logo1.png"
           alt="Agent Logo"
           className="h-30 w-30 rounded-full border-2 border-white"
         />
