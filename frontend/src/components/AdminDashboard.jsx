@@ -1,5 +1,6 @@
 // src/components/AdminDashboard.jsx
-import React, { useState, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
+import axios from '../api/admin'; // axios instance, baseURL = http://localhost:3001
 
 const AdminDashboard = () => {
   const [email, setEmail] = useState('');
@@ -8,60 +9,58 @@ const AdminDashboard = () => {
   const [error, setError] = useState('');
   const [managers, setManagers] = useState([]);
   const [editIndex, setEditIndex] = useState(null);
-  const idCounter = useRef(1);
 
-  const resetForm = () => {
-    setName('');
-    setEmail('');
-    setEditIndex(null);
-  };
+  useEffect(() => {
+    axios
+      .get('/manager')
+      .then(res => setManagers(res.data))
+      .catch(() => {});
+  }, []);
 
-  const handleAddOrEdit = () => {
+  const handleAddOrEdit = async () => {
     setMessage('');
     setError('');
-    if (!name.trim() || !email.trim()) {
-      setError('Name and email are required.');
-      return;
+    if (!email.trim() || !name.trim()) {
+      return setError('Name and email are required.');
     }
-    if (editIndex === null) {
-      // add
-      if (managers.some(m => m.email === email)) {
-        setError('Email already in use.');
-        return;
-      }
-      const newMgr = {
-        id_number: idCounter.current++,
-        name: name.trim(),
-        email: email.trim(),
-      };
-      setManagers([...managers, newMgr]);
-      setMessage('Manager added.');
-    } else {
-      // edit
-      const duplicate = managers.some(
-        (m, i) => m.email === email && i !== editIndex
-      );
-      if (duplicate) {
-        setError('Email already in use.');
-        return;
-      }
-      const updated = managers.map((m, i) =>
-        i === editIndex ? { ...m, name: name.trim(), email: email.trim() } : m
-      );
-      setManagers(updated);
-      setMessage('Manager updated.');
+    if (editIndex === null && managers.some(m => m.email === email)) {
+      return setError('Email already in use.');
     }
-    resetForm();
+
+    try {
+      if (editIndex !== null) {
+        const mgr = managers[editIndex];
+        await axios.put(`/manager/${mgr.id_number}`, { email, name });
+        setManagers(ms =>
+          ms.map((m, i) => (i === editIndex ? { ...m, email, name } : m))
+        );
+        setMessage('Manager updated.');
+      } else {
+        const res = await axios.post('/manager/register', { email, name });
+        setManagers(ms => [
+          ...ms,
+          { email, name, id_number: res.data.id_number },
+        ]);
+        setMessage('Manager added.');
+      }
+      setEmail('');
+      setName('');
+      setEditIndex(null);
+    } catch (err) {
+      setError(err.response?.data?.error || 'Something went wrong.');
+    }
   };
 
-  const handleDelete = i => {
+  const handleDelete = async idNumber => {
     setMessage('');
     setError('');
-    const updated = managers.filter((_, idx) => idx !== i);
-    setManagers(updated);
-    setMessage('Manager removed.');
-    // if you were editing this one, reset form
-    if (editIndex === i) resetForm();
+    try {
+      await axios.delete(`/manager/${idNumber}`);
+      setManagers(ms => ms.filter(m => m.id_number !== idNumber));
+      setMessage('Manager removed.');
+    } catch {
+      setError('Delete failed.');
+    }
   };
 
   const startEdit = i => {
@@ -74,9 +73,18 @@ const AdminDashboard = () => {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50 pt-20">
-      <div className="max-w-4xl mx-auto py-8 space-y-8">
-        {/* Form */}
+    <div className="relative min-h-screen bg-gray-50 pt-35">
+      {/* repeating watermark behind */}
+      <div
+        className="absolute inset-0 bg-repeat opacity-20"
+        style={{
+          backgroundImage: "url('/images/logo.png')",
+          backgroundSize: '200px 200px'
+        }}
+      />
+      {/* main content above watermark */}
+      <div className="relative z-10 max-w-4xl mx-auto py-8 space-y-8">
+        {/* Form Section */}
         <section className="bg-white rounded-lg shadow-sm p-6">
           <h2 className="text-2xl text-gray-800 mb-4">
             {editIndex !== null ? 'Edit Manager' : 'Add New Manager'}
@@ -89,7 +97,7 @@ const AdminDashboard = () => {
                 value={name}
                 onChange={e => setName(e.target.value)}
                 placeholder="Full name"
-                className="w-full border border-gray-300 rounded px-3 py-2"
+                className="w-full border border-gray-300 rounded px-3 py-2 text-gray-800 focus:outline-none focus:ring-2 focus:ring-[#4F5862]"
               />
             </div>
             <div>
@@ -99,21 +107,21 @@ const AdminDashboard = () => {
                 value={email}
                 onChange={e => setEmail(e.target.value)}
                 placeholder="email@example.com"
-                className="w-full border border-gray-300 rounded px-3 py-2"
+                className="w-full border border-gray-300 rounded px-3 py-2 text-gray-800 focus:outline-none focus:ring-2 focus:ring-green-500"
               />
             </div>
             <button
               onClick={handleAddOrEdit}
-              className="mt-2 bg-green-600 text-white rounded px-4 py-2"
+              className="mt-2 bg-[#8A9A57] text-white rounded px-4 py-2 hover:bg-green-700 transition"
             >
               {editIndex !== null ? 'Update' : 'Add'}
             </button>
-            {message && <p className="text-green-600 mt-2 text-sm">{message}</p>}
+            {message && <p className="text[-green-600] mt-2 text-sm">{message}</p>}
             {error && <p className="text-red-600 mt-2 text-sm">{error}</p>}
           </div>
         </section>
 
-        {/* List */}
+        {/* Managers List */}
         <section className="bg-white rounded-lg shadow-sm p-6">
           <h2 className="text-2xl text-gray-800 mb-4">Account Managers</h2>
           {managers.length === 0 ? (
@@ -123,23 +131,43 @@ const AdminDashboard = () => {
               <table className="w-full text-gray-800">
                 <thead>
                   <tr>
-                    <th className="py-2 px-3 text-left border-b">Name</th>
-                    <th className="py-2 px-3 text-left border-b">Email</th>
-                    <th className="py-2 px-3 text-left border-b">ID</th>
-                    <th className="py-2 px-3 text-left border-b">Actions</th>
+                    <th className="py-2 px-3 text-left border-b border-gray-200">
+                      Name
+                    </th>
+                    <th className="py-2 px-3 text-left border-b border-gray-200">
+                      Email
+                    </th>
+                    <th className="py-2 px-3 text-left border-b border-gray-200">
+                      ID Number
+                    </th>
+                    <th className="py-2 px-3 text-left border-b border-gray-200">
+                      Actions
+                    </th>
                   </tr>
                 </thead>
                 <tbody>
                   {managers.map((m, i) => (
-                    <tr key={m.id_number}>
-                      <td className="py-2 px-3 border-b">{m.name}</td>
-                      <td className="py-2 px-3 border-b">{m.email}</td>
-                      <td className="py-2 px-3 border-b">{m.id_number}</td>
-                      <td className="py-2 px-3 border-b space-x-2">
-                        <button onClick={() => startEdit(i)} className="text-green-600">
+                    <tr key={`${m.id_number}-${i}`}>
+                      <td className="py-2 px-3 border-b border-gray-100">
+                        {m.name}
+                      </td>
+                      <td className="py-2 px-3 border-b border-gray-100">
+                        {m.email}
+                      </td>
+                      <td className="py-2 px-3 border-b border-gray-100">
+                        {m.id_number}
+                      </td>
+                      <td className="py-2 px-3 border-b border-gray-100 space-x-2">
+                        <button
+                          onClick={() => startEdit(i)}
+                          className="text-sm text-green-600 hover:underline focus:outline-none"
+                        >
                           Edit
                         </button>
-                        <button onClick={() => handleDelete(i)} className="text-red-600">
+                        <button
+                          onClick={() => handleDelete(m.id_number)}
+                          className="text-sm text-red-600 hover:underline focus:outline-none"
+                        >
                           Delete
                         </button>
                       </td>
